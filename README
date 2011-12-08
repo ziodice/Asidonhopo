@@ -1,6 +1,23 @@
-
 Asidonhopo IRC bot for #zibohack on freenode
 
 To use, just run start.pl; it will create an example
 configuration file which you can use.
 
+Commands may be placed in Asidonhopo/Command.
+Note that they can be added on the fly.
+
+Triggers work like this:
+in the trigger database, table "triggers":
+when "trigger" matches something, say
+"speech". "trigger" is a Perl regular expression.
+
+Special sequences in trigger and speech:
+trigger:
+    §    - at the beginning of a trigger, this matches
+           CTCP ACTIONs.
+    §me§ - bot nick
+speech:
+    §then§ - new message.
+    §act§  - as first thing in message only; CTCP ACTION
+             the text.
+    §nick§ - whoever triggered it.
