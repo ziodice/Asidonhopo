@@ -8,9 +8,12 @@ use feature 'say';
 # with IRC component and ANSI color sequences for
 # screen-logging.
 use DBI;
+use URI;
+use XML::Feed;
 use Config::Any;
 use Term::ANSIColor qw(:pushpop :constants);
 use Module::Pluggable search_path => ['Asidonhopo::Command'], require => 1;
+require POE::Component::IRC::Common;
 use POE qw(
     Component::IRC::State
     Component::IRC::Plugin::NickReclaim
@@ -19,6 +22,7 @@ use POE qw(
     Component::IRC::Plugin::Connector
     Component::IRC::Plugin::CTCP
     Component::IRC::Plugin::Logger
+    Component::IRC::Plugin::FollowTail
 );
 
 sub error
@@ -87,6 +91,9 @@ sub empty_config_error
         print $example_file "  - '#another'\n";
         print $example_file "nickservkey: key\n";
         print $example_file "logdir: ./log\n";
+        print $example_file "tailfile: file_to_tail\n";
+        print $example_file "dbfile: my.db\n";
+        print $example_file "feed: 'http://127.0.0.1/feed'\n";
         print $example_file "cmd: '!'\n";
         print $example_file "admin: yournick\n";
         print $example_file "# remove this or it won't work\n";
@@ -135,11 +142,33 @@ sub create
     {
         $self->{dbh}->begin_work;
         $self->{dbh}->do(q{CREATE TABLE triggers (id INTEGER PRIMARY KEY, trigger VARCHAR(300) UNIQUE, speech VARCHAR(300) )});
+        $self->{dbh}->do(q{CREATE TABLE posts (id INTEGER PRIMARY KEY, uuid VARCHAR(30) UNIQUE )});
+        $self->{dbh}->do(q{CREATE TABLE seen (id INTEGER PRIMARY KEY, nick VARCHAR(30) UNIQUE, state INTEGER, msg VARCHAR(500) )});
         $self->{dbh}->commit;
         exit 1;
     }
+    unless ( -e $self->{config}{tailfile} ) {
+        open my $tmp, '>', $self->{config}{tailfile};
+        print $tmp '';
+        close $tmp;
+    }
     $self->{trigger_get} = $self->{dbh}->prepare(
         q{SELECT speech FROM triggers WHERE ? REGEXP trigger}
+    ) or (fatalerror 3);
+    $self->{blog_find} = $self->{dbh}->prepare(
+        q{SELECT id FROM posts WHERE uuid = ?}
+    ) or (fatalerror 3);
+    $self->{blog_add} = $self->{dbh}->prepare(
+        q{INSERT INTO posts (uuid) VALUES (?)}
+    ) or (fatalerror 3);
+    $self->{seen_add} = $self->{dbh}->prepare(
+        q{INSERT INTO seen (nick, time, state, p1, p2) VALUES (?,?,?,?,?)}
+    ) or (fatalerror 3);
+    $self->{seen_del} = $self->{dbh}->prepare(
+        q{DELETE FROM seen WHERE nick = ?}
+    ) or (fatalerror 3);
+    $self->{seen_check} = $self->{dbh}->prepare(
+        q{SELECT time, state, p1, p2 FROM seen WHERE nick = ?}
     ) or (fatalerror 3);
 
     $self->{irc} = POE::Component::IRC::State->spawn
@@ -160,6 +189,7 @@ sub create
             [
                 '_start',
                 '_stop',
+                'timer',
                 'process_chat',
                 'irc_001',
                 'irc_public',
@@ -173,6 +203,8 @@ sub create
                 'irc_quit',
                 'irc_topic',
                 'irc_identified',
+                'irc_tail_input',
+                'keepalive',
             ]
         ]
     );
@@ -181,10 +213,13 @@ sub create
 
 sub _start
 {
-    my $self = shift;
+    my $self = $_[OBJECT];
     $self->{irc}->yield( register => 'all' );
     $self->{irc}->plugin_add(
-        'Connector' => POE::Component::IRC::Plugin::Connector->new());
+        'Connector' => POE::Component::IRC::Plugin::Connector->new(
+            delay => 60,
+            reconnect => 30,
+        ));
     $self->{irc}->plugin_add(
         'NickServID' => POE::Component::IRC::Plugin::NickServID->new(
             Password => "$self->{config}{nick} $self->{config}{nickservkey}",
@@ -193,6 +228,10 @@ sub _start
         'AutoJoin' => POE::Component::IRC::Plugin::AutoJoin->new());
     $self->{irc}->plugin_add(
         'NickReclaim' => POE::Component::IRC::Plugin::NickReclaim->new());
+    $self->{irc}->plugin_add(
+        'FollowTail' => POE::Component::IRC::Plugin::FollowTail->new(
+            filename => $self->{config}{tailfile},
+        ));
     $self->{irc}->plugin_add(
         'CTCP' => POE::Component::IRC::Plugin::CTCP->new(
             source     => 'https://github.com/b-code/Asidonhopo',
@@ -211,6 +250,8 @@ sub _start
             Sort_by_date => 1,
         ));
     $self->{irc}->yield( connect  => { }   );
+    $_[KERNEL]->delay(timer => 30);
+    $_[KERNEL]->delay(keepalive => 40);
 }
 
 sub _stop
@@ -227,6 +268,27 @@ sub irc_identified
     $self->{irc}->yield(join => $_) for @{$self->{config}{channels}};
 }
 
+sub see
+{
+    my $self  = shift;
+    my $nick  = shift;
+    my $state = shift;
+    my $msg   = shift;
+    my $p2    = shift;
+    $self->{dbh}->begin_work;
+    $self->{seen_del}->execute($nick);
+    $self->{seen_add}->execute($nick, time, $state, $msg, $p2);
+    $self->{dbh}->commit;
+}
+
+sub seen
+{
+    my $self = shift;
+    my $nick = shift;
+    $self->{seen_check}->execute($nick);
+    return $self->{seen_check}->fetchrow_arrayref;
+}
+
 # how, who, whom, what, id?
 # how is:
 # 0 - public
@@ -236,6 +298,7 @@ sub irc_identified
 sub process_chat
 {
     my $self = $_[OBJECT];
+    $self->on_activity();
     my $param = {
         bot  => $self,
         who  => $_[ARG0],
@@ -247,6 +310,7 @@ sub process_chat
         me   => $self->{irc}->nick_name(),
     };
     $param->{nick} = (split (/!/, $param->{who}))[0];
+    $self->seen($param->{nick}, $param->{how}, $param->{what});
     my @cmds = $self->plugins;
     if ($param->{what} =~ /^$self->{config}{cmd}\s*(\w+)(?:\s+(\S.*))?/)
     {
@@ -288,6 +352,40 @@ sub process_chat
     }
 }
 
+sub timer
+{
+    $_[OBJECT]{updatenow} = 1;
+    $_[KERNEL]->delay(timer => 180);
+}
+
+sub keepalive
+{
+    $_[OBJECT]{irc}->yield(ping => time);
+    $_[KERNEL]->delay(keepalive => 40);
+}
+
+sub on_activity
+{
+    my $self = $_[OBJECT];
+    if ($self->{updatenow})
+    {
+        $self->{updatenow} = 0;
+        my $feed = XML::Feed->parse(URI->new($self->{config}{feed}));
+        for ($feed->entries)
+        {
+            unless ($self->{blog_find}->execute($_->id)
+                    and $self->{blog_find}->fetchrow_array())
+            {
+                $self->{blog_add}->execute($_->id);
+                my $title = $_->title;
+                my $link  = $_->link;
+                open my $f, '>>', $self->{config}{tailfile};
+                print $f "-!-$title ($link)-!-\n";
+            }
+        }
+    }
+}
+
 sub speak
 {
     my $self = shift;
@@ -316,6 +414,26 @@ sub speak
             $self->{irc}->yield (privmsg => $target => $_->[1]);
         }
     }
+}
+
+sub irc_tail_input
+{
+    my $self = $_[OBJECT];
+    if ($_[ARG1] =~ /-!-(.*)-!-/) {
+        $self->publish_update ($1);
+    }
+}
+
+sub publish_update
+{
+    my $self = shift;
+    my $update = shift;
+    $self->{irc}->yield(privmsg =>
+        $_ => POE::Component::IRC::Common::BOLD
+        ."Update: "
+        . POE::Component::IRC::Common::NORMAL
+        .$update)
+    for (@{$self->{config}{channels}});
 }
 
 sub irc_public
