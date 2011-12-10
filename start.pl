@@ -5,7 +5,7 @@ use warnings;
 use POE;
 use Asidonhopo;
 
-my $pid = fork;
+my $pid = fork unless shift;
 
 exit if $pid;
 
