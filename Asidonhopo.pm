@@ -318,6 +318,11 @@ sub process_chat
         my $args    = $2 // '';
         for my $mod (@cmds)
         {
+            if ($mod->can(lc $command) and not $mod->can($command))
+            {
+                $self->{irc}->yield(privmsg => $param->{whom} => "$param->{nick}: Try that in lowercase.");
+                last;
+            }
             next unless $mod->can($command);
             last if $mod->$command($param, split (/\s+/, $args));
         }
