@@ -9,7 +9,9 @@ sub quit
     my $arg = join (' ', @_) // 'Shutdown';
     if ($param->{nick} eq $param->{bot}{config}{admin} and $param->{id})
     {
-        $param->{bot}{irc}->yield(shutdown => $arg);
+        $param->{bot}{irc}->call(shutdown => $arg);
+        sleep 7;
+        exit;
         return 1;
     }
     else
