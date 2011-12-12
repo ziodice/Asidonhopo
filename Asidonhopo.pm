@@ -93,7 +93,7 @@ sub empty_config_error
         print $example_file "logdir: ./log\n";
         print $example_file "tailfile: file_to_tail\n";
         print $example_file "dbfile: my.db\n";
-        print $example_file "feed: 'http://127.0.0.1/feed'\n";
+        print $example_file "#feed: 'http://127.0.0.1/feed'\n";
         print $example_file "cmd: '!'\n";
         print $example_file "admin: yournick\n";
         print $example_file "# remove this or it won't work\n";
@@ -375,17 +375,21 @@ sub on_activity
     if ($self->{updatenow})
     {
         $self->{updatenow} = 0;
-        my $feed = XML::Feed->parse(URI->new($self->{config}{feed}));
-        for ($feed->entries)
+        # Just don't specify it and Asidonhopo won't check.
+        if (defined $self->{config}{feed})
         {
-            unless ($self->{blog_find}->execute($_->id)
-                    and $self->{blog_find}->fetchrow_array())
+            my $feed = XML::Feed->parse(URI->new($self->{config}{feed}));
+            for ($feed->entries)
             {
-                $self->{blog_add}->execute($_->id);
-                my $title = $_->title;
-                my $link  = $_->link;
-                open my $f, '>>', $self->{config}{tailfile};
-                print $f "-!-$title - $link-!-\n";
+                unless ($self->{blog_find}->execute($_->id)
+                        and $self->{blog_find}->fetchrow_array())
+                {
+                    $self->{blog_add}->execute($_->id);
+                    my $title = $_->title;
+                    my $link  = $_->link;
+                    open my $f, '>>', $self->{config}{tailfile};
+                    print $f "-!-$title - $link-!-\n";
+                }
             }
         }
     }
