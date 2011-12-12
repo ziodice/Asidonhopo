@@ -385,7 +385,7 @@ sub on_activity
                 my $title = $_->title;
                 my $link  = $_->link;
                 open my $f, '>>', $self->{config}{tailfile};
-                print $f "-!-$title ($link)-!-\n";
+                print $f "-!-$title - $link-!-\n";
             }
         }
     }
