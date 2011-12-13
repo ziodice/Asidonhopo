@@ -256,6 +256,7 @@ sub _start
 
 sub _stop
 {
+    exit;
 }
 
 sub irc_001
@@ -360,13 +361,13 @@ sub process_chat
 sub timer
 {
     $_[OBJECT]{updatenow} = 1;
-    $_[KERNEL]->delay(timer => 180);
+    $_[KERNEL]->delay(timer => 180) unless $_[OBJECT]{killme};
 }
 
 sub keepalive
 {
     $_[OBJECT]{irc}->yield(ping => time);
-    $_[KERNEL]->delay(keepalive => 40);
+    $_[KERNEL]->delay(keepalive => 40) unless $_[OBJECT]{killme};
 }
 
 sub on_activity

@@ -10,8 +10,7 @@ sub quit
     if ($param->{nick} eq $param->{bot}{config}{admin} and $param->{id})
     {
         $param->{bot}{irc}->call(shutdown => $arg);
-        sleep 7;
-        exit;
+        #$param->{bot}{killme} = 1;
         return 1;
     }
     else
