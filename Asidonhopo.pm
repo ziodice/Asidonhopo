@@ -407,6 +407,7 @@ sub keepalive
 
 sub on_activity
 {
+    if (0) { # NOEXEC: db error
     my $self = $_[OBJECT];
     if ($self->{updatenow})
     {
@@ -420,6 +421,7 @@ sub on_activity
                 unless ($self->{blog_find}->execute($_->id)
                         and $self->{blog_find}->fetchrow_array())
                 {
+                    # This can't write... hmm...
                     $self->{blog_add}->execute($_->id);
                     my $title = $_->title;
                     my $link  = $_->link;
@@ -429,6 +431,7 @@ sub on_activity
             }
         }
     }
+    } # NOEXEC END
 }
 
 sub speak
