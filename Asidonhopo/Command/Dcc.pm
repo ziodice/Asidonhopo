@@ -1,16 +1,15 @@
-package Asidonhopo::Command::Quit;
+package Asidonhopo::Command::Dcc;
 use strict;
 use warnings;
 
-sub quit
+sub dcc
 {
     my $self = shift;
     my $param = shift;
     my $arg = join (' ', @_) // 'Shutdown';
     if ($param->{bot}->is_bot_admin($param->{who}))
     {
-        $param->{bot}{irc}->call(shutdown => $arg);
-        #$param->{bot}{killme} = 1;
+        $param->{bot}{irc}->yield(dcc => $param->{nick} => 'CHAT');
         return 1;
     }
     else

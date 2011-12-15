@@ -82,6 +82,7 @@ sub empty_config_error
         notice 0, $example_file_name;
         open my $example_file, '>', $example_file_name;
         print $example_file "---\n";
+        print $example_file "# Basic bot data\n";
         print $example_file "nick: SuperBot_nick\n";
         print $example_file "username: mybotuser\n";
         print $example_file "ircname: 'My SuperBot (IRC bot)'\n";
@@ -91,16 +92,36 @@ sub empty_config_error
         print $example_file "  - '#another'\n";
         print $example_file "nickservkey: key\n";
         print $example_file "logdir: ./log\n";
+        print $example_file "# Tail this file for updates\n";
         print $example_file "tailfile: file_to_tail\n";
         print $example_file "dbfile: my.db\n";
+        print $example_file "# Uncomment this to track an RSS feed\n";
         print $example_file "#feed: 'http://127.0.0.1/feed'\n";
+        print $example_file "# Command prefix\n";
         print $example_file "cmd: '!'\n";
+        print $example_file "# Admin info\n";
         print $example_file "admin: yournick\n";
+        print $example_file "# You can add new blocks, too\n";
+        print $example_file "control:\n";
+        print $example_file "  - name: accname\n";
+        print $example_file "    mask: 'nick!user\@host'\n";
+        print $example_file "    key: 'yourkey'\n";
         print $example_file "# remove this or it won't work\n";
         print $example_file "unconfigured: yes\n";
         close $example_file;
         notice 1, $example_file_name;
     }
+}
+
+sub is_bot_admin
+{
+    my $self = shift;
+    my $mask = shift;
+    for (@{$self->{config}{control}})
+    {
+        return 1 if ($mask =~ /$_->{mask}/);
+    }
+    return 0;
 }
 
 sub create
@@ -204,6 +225,10 @@ sub create
                 'irc_topic',
                 'irc_identified',
                 'irc_tail_input',
+                'irc_dcc_start',
+                'irc_dcc_chat',
+                'irc_dcc_done',
+                'irc_dcc_error',
                 'keepalive',
             ]
         ]
@@ -311,6 +336,16 @@ sub process_chat
         me   => $self->{irc}->nick_name(),
     };
     $param->{nick} = (split (/!/, $param->{who}))[0];
+    if ($param->{how} & 1)
+    {
+        $param->{private} = 1;
+        $param->{target} = $param->{nick};
+    }
+    else
+    {
+        $param->{private} = 0;
+        $param->{target} = $param->{whom};
+    }
     $self->seen($param->{nick}, $param->{how}, $param->{what});
     my @cmds = $self->plugins;
     if ($param->{what} =~ /^$self->{config}{cmd}\s*(\w+)(?:\s+(\S.*))?/)
@@ -450,6 +485,57 @@ sub irc_public
 {
     $_[KERNEL]->yield (process_chat => (@_[ARG0..ARG3], 0));
 }
+
+# DCC
+sub irc_dcc_start
+{
+    push @{$_[OBJECT]->{dcc}}, $_[ARG0];
+}
+
+sub irc_dcc_done
+{
+    @{$_[OBJECT]->{dcc}} = grep { $_ eq $_[ARG0] ? 0 : 1 } @{$_[OBJECT]->{dcc}};
+}
+
+sub irc_dcc_error
+{
+    @{$_[OBJECT]->{dcc}} = grep { $_ eq $_[ARG0] ? 0 : 1 } @{$_[OBJECT]->{dcc}};
+}
+
+sub irc_dcc_chat
+{
+    my $self = $_[OBJECT];
+    my $text = $_[ARG3];
+    if ($text =~ /^>(.*)$/)
+    {
+        $self->{sbuf} = [ split (/\s+/, $1) ];
+    }
+    elsif ($text =~ /^-(.*)$/)
+    {
+        if (not defined $self->{sbuf})
+        {
+            return;
+        }
+        $self->{irc}->yield(privmsg => $self->{sbuf} => $1);
+    }
+    elsif ($text =~ /^\*(.*)$/)
+    {
+        if (not defined $self->{sbuf})
+        {
+            return;
+        }
+        $self->{irc}->yield(ctcp => $self->{sbuf} => "ACTION $1");
+    }
+    elsif ($text =~ /^!(.*)$/)
+    {
+        if (not defined $self->{sbuf})
+        {
+            return;
+        }
+        $self->{irc}->yield(notice => $self->{sbuf} => $1);
+    }
+}
+# DCC end
 
 sub irc_msg
 {
