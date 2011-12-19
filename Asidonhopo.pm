@@ -407,7 +407,6 @@ sub keepalive
 
 sub on_activity
 {
-    if (0) { # NOEXEC: db error
     my $self = $_[OBJECT];
     if ($self->{updatenow})
     {
@@ -431,7 +430,6 @@ sub on_activity
             }
         }
     }
-    } # NOEXEC END
 }
 
 sub speak
