@@ -537,6 +537,11 @@ sub irc_dcc_chat
         }
         $self->{irc}->yield(notice => $self->{sbuf} => $1);
     }
+    elsif ($text =~ m:^/(.*)$:)
+    {
+        # Be careful with this
+        $self->{irc}->yield(quote => $1);
+    }
 }
 # DCC end
 
