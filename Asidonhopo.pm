@@ -475,7 +475,8 @@ sub publish_update
     my $self = shift;
     my $update = shift;
     $self->{irc}->yield(privmsg =>
-        $_ => POE::Component::IRC::Common::BOLD
+        $_ =>
+          POE::Component::IRC::Common::BOLD
         ."Update: "
         . POE::Component::IRC::Common::NORMAL
         .$update)
