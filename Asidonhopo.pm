@@ -165,6 +165,7 @@ sub create
         $self->{dbh}->do(q{CREATE TABLE triggers (id INTEGER PRIMARY KEY, trigger VARCHAR(300) UNIQUE, speech VARCHAR(300) )});
         $self->{dbh}->do(q{CREATE TABLE posts (id INTEGER PRIMARY KEY, uuid VARCHAR(30) UNIQUE )});
         $self->{dbh}->do(q{CREATE TABLE seen (id INTEGER PRIMARY KEY, nick VARCHAR(30) UNIQUE, state INTEGER, msg VARCHAR(500) )});
+        $self->{dbh}->do(q{CREATE TABLE msg (id INTEGER PRIMARY KEY, timespec INTEGER, sender VARCHAR(30), recipient VARCHAR(30), text VARCHAR(300))});
         $self->{dbh}->commit;
         exit 1;
     }
@@ -190,6 +191,15 @@ sub create
     ) or (fatalerror 3);
     $self->{seen_check} = $self->{dbh}->prepare(
         q{SELECT time, state, p1, p2 FROM seen WHERE nick = ?}
+    ) or (fatalerror 3);
+    $self->{msg_add} = $self->{dbh}->prepare(
+        q{INSERT INTO msg (timespec, sender, recipient, text) VALUES (?,?,?,?)}
+    ) or (fatalerror 3);
+    $self->{msg_check} = $self->{dbh}->prepare(
+        q{SELECT id, timespec, sender, recipient, text FROM msg WHERE recipient = ?}
+    ) or (fatalerror 3);
+    $self->{msg_del} = $self->{dbh}->prepare(
+        q{DELETE FROM msg WHERE id = ?}
     ) or (fatalerror 3);
 
     $self->{irc} = POE::Component::IRC::State->spawn
@@ -345,6 +355,16 @@ sub process_chat
     {
         $param->{private} = 0;
         $param->{target} = $param->{whom};
+        $self->{msg_check}->execute($param->{nick});
+        while ($_ = $self->{msg_check}->fetchrow_arrayref())
+        {
+            $self->{msg_del}->execute($_->[0]);
+            $self->{irc}->yield(privmsg => $param->{whom} =>
+                "$_->[3], I have a message for you. $_->[2] said ("
+                . gmtime($_->[1])
+                . "): $_->[4]"
+            );
+        }
     }
     $self->seen($param->{nick}, $param->{how}, $param->{what});
     my @cmds = $self->plugins;
@@ -420,7 +440,6 @@ sub on_activity
                 unless ($self->{blog_find}->execute($_->id)
                         and $self->{blog_find}->fetchrow_array())
                 {
-                    # This can't write... hmm...
                     $self->{blog_add}->execute($_->id);
                     my $title = $_->title;
                     my $link  = $_->link;
