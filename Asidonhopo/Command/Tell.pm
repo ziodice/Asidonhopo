@@ -15,7 +15,22 @@ sub tell
     {
         if (defined $nick and ($arg // '') ne '')
         {
-            $param->{bot}{msg_add}->execute(time, $param->{nick}, $nick, $arg);
+            if ($nick eq $param->{bot}{irc}->nick_name())
+            {
+                $param->{bot}{irc}->yield(ctcp => $param->{whom} =>
+                    "ACTION discards some spam from $param->{nick}.");
+            }
+            elsif ($nick eq $param->{bot}{irc}->nick_name())
+            {
+                $param->{bot}{irc}->yield(privmsg => $param->{whom} =>
+                    "$param->{nick}: No.");
+            }
+            else
+            {
+                $param->{bot}{irc}->yield(privmsg => $param->{whom} =>
+                    "$param->{nick}: OK, I'll tell $nick.");
+                $param->{bot}{msg_add}->execute(time, $param->{nick}, $nick, $arg);
+            }
         }
     }
     return 1;
