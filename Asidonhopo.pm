@@ -119,7 +119,7 @@ sub is_bot_admin
     my $mask = shift;
     for (@{$self->{config}{control}})
     {
-        return 1 if ($mask =~ /$_->{mask}/);
+        return 1 if (defined $mask and $mask eq $_->{mask});
     }
     return 0;
 }
